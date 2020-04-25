@@ -1,0 +1,49 @@
+Sxyz = xz(yz)
+Kxy = x
+Ix = x ; I = SKK
+Bxyz = x(yz) ; B = S(KS)K
+Cxyz = xzy ; C = S(BBS)(KK)
+Txy = yx ; T = CI
+Vxyz = zxy ; V = BCT
+Mx = xx ; M = SII
+Lxy = x(yy) ; L = CBM
+
+0 = KI
+1 = I
+x+1 = SBx
+x+y = S(BBx)y
+x*y = Bxy
+x^y = yx
+
+x-y = x(VI(B(BKT)(SB)))(y(C(BK))(K(T(KI))))(K(KI))I
+
+compute x = x(SB)(KI)
+
+infinity = M(L(SB))
+256 = SB(SBI)(SBI)(SBI)
+729 = SBI(SB(SBI)(SB(SBI)))
+
+x^^y = y(Tx)I
+x^^^y = y(V(Tx)I)I
+x^^^^y = y(V(V(Tx)I)I)I
+...
+
+convert_to_mockingbird x = x(V(KI))I
+convert_from_mockingbird x = M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))x
+
+mockingbird_format:
+
+0 = I
+x+1 = V(KI)x
+x-1 = x(KI)
+x?0 = xK (true=K;false=KI)
+
+...
+
+x-y = M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(y(T(KI))(x(V(KI))I))
+
+M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(SBI)(SBI)(T(KI))(SBI(SB(SBI)(SB(SBI)))(V(KI))I))
+
+M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(SBI)(SBI)(T(KI))(SB(SBI)(SBI)(SBI)(V(KI))I))
+
+M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(T(KI))(SBI(V(KI))I))
