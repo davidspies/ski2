@@ -184,8 +184,8 @@ inlineWHNF = \case
 
 stepLS, stepS :: forall s . Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
 stepLS t0 = do
-    t0' <- lift $ inlineWHNF t0
-    liftMaybe (reduceKs t0' <|> reduceIs t0' <|> reduceOrders t0') <|> go t0'
+    res <- liftMaybe (reduceKs t0 <|> reduceIs t0 <|> reduceOrders t0) <|> go t0
+    lift $ inlineWHNF res
   where
     go :: Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
     go t = case t of
@@ -196,15 +196,10 @@ stepLS t0 = do
                 M           :> x -> return $ x :> x
                 S :> x :> y :> z -> return $ x :> z :> (y :> z)
                 _                -> (:> r') <$> go l
-        X (TermRef ref) -> do
-            v  <- lift $ readSTRef ref >>= runMaybeT . stepLS
-            v' <- case v of
-                Nothing -> do
-                    val <- lift $ inline =<< readSTRef ref
-                    error $ "Not inlined: " ++ show val
-                Just v' -> return v'
-            lift $ writeSTRef ref v'
-            return $ X $ TermRef ref
+        x@(X (TermRef ref)) -> lift $ do
+            v <- readSTRef ref >>= runMaybeT . stepLS
+            writeSTRef ref (fromMaybe (error "Not inlined") v)
+            return x
         _ -> empty
 stepS t = stepLS t <|> case t of
     l :> r -> (:> r) <$> stepS l <|> (l :>) <$> stepS r
