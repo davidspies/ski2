@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -13,12 +14,14 @@ import           Control.Monad.Trans.Maybe
 import           Control.Monad.Yield.ST
 import           Data.Bifunctor
 import           Data.Char                      ( isLower )
+import           Data.Foldable
+import           Data.Functor
 import           Data.Maybe
 import           Data.STRef
 import           Data.Void
 
 data Term v = S | K | I | B | T | V | L | M | C | (:>) (Term v) (Term v) | X v
-    deriving Functor
+    deriving (Functor, Foldable)
 infixl 9 :>
 
 instance Show (Term Char) where
@@ -162,9 +165,10 @@ isWHNF :: Term v -> Bool
 isWHNF = \case
     x@(l :> _) | isJust $ maybeStep x -> False
                | otherwise            -> isWHNF l
-    _ -> True
+    X _ -> False
+    _   -> True
 
-newtype TermRef s = TermRef (STRef s (Term (TermRef s)))
+newtype TermRef s = TermRef {unTermRef :: STRef s (Term (TermRef s))}
 
 subOut :: Term (TermRef s) -> ST s (Term (TermRef s))
 subOut = \case
@@ -178,32 +182,53 @@ inlineWHNF = \case
     X (TermRef ref) -> do
         x <- readSTRef ref
         y <- inlineWHNF x
-        writeSTRef ref y
-        return $ if isWHNF y then y else X (TermRef ref)
+        if isWHNF y
+            then do
+                y' <- subOut y
+                writeSTRef ref y'
+                return y'
+            else do
+                writeSTRef ref y
+                return $ X (TermRef ref)
     x -> return x
 
 stepLS, stepS :: forall s . Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
-stepLS t0 = do
-    res <- liftMaybe (reduceKs t0 <|> reduceIs t0 <|> reduceOrders t0) <|> go t0
+stepLS = \case
+    l :> r -> do
+        r' <- lift $ subOut r
+        case l :> r' of
+            L :> x      :> y -> return $ x :> (y :> y)
+            M           :> x -> return $ x :> x
+            S :> x :> y :> z -> return $ x :> z :> (y :> z)
+            _                -> (:> r') <$> stepLS l
+    x@(X (TermRef ref)) -> lift $ do
+        v <- readSTRef ref >>= runMaybeT . stepLS
+        writeSTRef ref (fromMaybe (error "Not inlined") v)
+        return x
+    _ -> empty
+stepS t = do
+    res <-
+        recurseReduce reduceKs t
+        <|> recurseReduce reduceIs     t
+        <|> recurseReduce reduceOrders t
+        <|> stepLS t
+        <|> case t of
+                l :> r -> (:> r) <$> stepS l <|> (l :>) <$> stepS r
+                _      -> empty
     lift $ inlineWHNF res
+
+recurseReduce
+    :: (Term (TermRef s) -> Maybe (Term (TermRef s)))
+    -> Term (TermRef s)
+    -> MaybeT (ST s) (Term (TermRef s))
+recurseReduce op = go
   where
-    go :: Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
-    go t = case t of
-        l :> r -> do
-            r' <- lift $ subOut r
-            case l :> r' of
-                L :> x      :> y -> return $ x :> (y :> y)
-                M           :> x -> return $ x :> x
-                S :> x :> y :> z -> return $ x :> z :> (y :> z)
-                _                -> (:> r') <$> go l
-        x@(X (TermRef ref)) -> lift $ do
-            v <- readSTRef ref >>= runMaybeT . stepLS
-            writeSTRef ref (fromMaybe (error "Not inlined") v)
-            return x
-        _ -> empty
-stepS t = stepLS t <|> case t of
-    l :> r -> (:> r) <$> stepS l <|> (l :>) <$> stepS r
-    _      -> empty
+    go t = liftMaybe (op t) <|> do
+        asum $ t <&> \(TermRef ref) -> do
+            x <- lift $ readSTRef ref
+            y <- go x
+            lift $ writeSTRef ref y
+        return t
 
 fastSteps :: Term Void -> [Term Void]
 fastSteps t0 = runYieldST $ go (absurd <$> t0)
