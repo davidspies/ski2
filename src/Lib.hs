@@ -230,19 +230,25 @@ recurseReduce op = go
             lift $ writeSTRef ref y
         return t
 
-fastSteps :: Term Void -> [Term Void]
+newtype RecTerm = RecTerm (Term RecTerm)
+
+instance Show RecTerm where
+    showsPrec d (RecTerm t) =
+        showsPrecWith (\t' -> showString "$" . showParen True (shows t')) d t
+
+fastSteps :: Term Void -> [RecTerm]
 fastSteps t0 = runYieldST $ go (absurd <$> t0)
   where
-    go :: Term (TermRef s) -> YieldST s (Term Void) ()
+    go :: Term (TermRef s) -> YieldST s RecTerm ()
     go t = do
-        yield =<< stToPrim (inline t)
+        yield . RecTerm =<< stToPrim (inline t)
         stToPrim (runMaybeT $ stepS t) >>= \case
             Just t' -> go t'
             Nothing -> return ()
 
-inline :: Term (TermRef s) -> ST s (Term Void)
+inline :: Term (TermRef s) -> ST s (Term RecTerm)
 inline = \case
-    X (TermRef ref) -> inline =<< readSTRef ref
+    X (TermRef ref) -> fmap (X . RecTerm) . inline =<< readSTRef ref
     l :> r          -> (:>) <$> inline l <*> inline r
     x               -> return $ error "unreachable" <$> x
 
