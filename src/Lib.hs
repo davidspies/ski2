@@ -7,9 +7,14 @@
 module Lib where
 
 import           Control.Applicative
+import           Control.Monad.ST
+import           Control.Monad.Trans            ( lift )
+import           Control.Monad.Trans.Maybe
+import           Control.Monad.Yield.ST
 import           Data.Bifunctor
 import           Data.Char                      ( isLower )
 import           Data.Maybe
+import           Data.STRef
 import           Data.Void
 
 data Term v = S | K | I | B | T | V | L | M | C | (:>) (Term v) (Term v) | X v
@@ -108,7 +113,7 @@ reduction :: (Term v -> Maybe (Term v)) -> Term v -> Maybe (Term v)
 reduction s = go
   where
     go x = s x <|> case x of
-        l :> r -> ((:>) <$> go l <*> pure r) <|> ((:>) <$> pure l <*> go r)
+        l :> r -> (:> r) <$> go l <|> (l :>) <$> go r
         _      -> Nothing
 
 evaluate :: Term v -> Term v
@@ -117,17 +122,20 @@ evaluate = \case
     x      -> x
 
 tryStep :: Term v -> Term v
-tryStep = \case
-    S :> x :> y :> z  -> x |> z |> (y |> z)
-    K      :> x :> _y -> x
-    I           :> x  -> x
-    B :> x :> y :> z  -> x |> (y |> z)
-    T      :> x :> y  -> y |> x
-    V :> x :> y :> z  -> z |> x |> y
-    L      :> x :> y  -> x |> (y |> y)
-    M           :> x  -> x |> x
-    C :> x :> y :> z  -> x |> z |> y
-    x                 -> x
+tryStep x = fromMaybe x (maybeStep x)
+
+maybeStep :: Term v -> Maybe (Term v)
+maybeStep = \case
+    S :> x :> y :> z -> Just $ x |> z |> (y |> z)
+    K      :> x :> _ -> Just x
+    I           :> x -> Just x
+    B :> x :> y :> z -> Just $ x |> (y |> z)
+    T      :> x :> y -> Just $ y |> x
+    V :> x :> y :> z -> Just $ z |> x |> y
+    L      :> x :> y -> Just $ x |> (y |> y)
+    M           :> x -> Just $ x |> x
+    C :> x :> y :> z -> Just $ x |> z |> y
+    _                -> Nothing
 
 (|>) :: Term v -> Term v -> Term v
 (|>) l r = tryStep (l :> r)
@@ -149,3 +157,74 @@ abstract x = go
             (l'     , K :> r') -> C :> l' :> r'
             (l'     , r'     ) -> S :> l' :> r'
         r -> K :> r
+
+isWHNF :: Term v -> Bool
+isWHNF = \case
+    x@(l :> _) | isJust $ maybeStep x -> False
+               | otherwise            -> isWHNF l
+    _ -> True
+
+newtype TermRef s = TermRef (STRef s (Term (TermRef s)))
+
+subOut :: Term (TermRef s) -> ST s (Term (TermRef s))
+subOut = \case
+    t@(l :> r) | isWHNF t  -> (l :>) <$> subOut r
+               | otherwise -> X . TermRef <$> newSTRef t
+    t -> return t
+
+inlineWHNF :: Term (TermRef s) -> ST s (Term (TermRef s))
+inlineWHNF = \case
+    l :> r          -> (:>) <$> inlineWHNF l <*> inlineWHNF r
+    X (TermRef ref) -> do
+        x <- readSTRef ref
+        y <- inlineWHNF x
+        writeSTRef ref y
+        return $ if isWHNF y then y else X (TermRef ref)
+    x -> return x
+
+stepLS, stepS :: forall s . Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
+stepLS t0 = do
+    t0' <- lift $ inlineWHNF t0
+    liftMaybe (reduceKs t0' <|> reduceIs t0' <|> reduceOrders t0') <|> go t0'
+  where
+    go :: Term (TermRef s) -> MaybeT (ST s) (Term (TermRef s))
+    go t = case t of
+        l :> r -> do
+            r' <- lift $ subOut r
+            case l :> r' of
+                L :> x      :> y -> return $ x :> (y :> y)
+                M           :> x -> return $ x :> x
+                S :> x :> y :> z -> return $ x :> z :> (y :> z)
+                _                -> (:> r') <$> go l
+        X (TermRef ref) -> do
+            v  <- lift $ readSTRef ref >>= runMaybeT . stepLS
+            v' <- case v of
+                Nothing -> do
+                    val <- lift $ inline =<< readSTRef ref
+                    error $ "Not inlined: " ++ show val
+                Just v' -> return v'
+            lift $ writeSTRef ref v'
+            return $ X $ TermRef ref
+        _ -> empty
+stepS t = stepLS t <|> case t of
+    l :> r -> (:> r) <$> stepS l <|> (l :>) <$> stepS r
+    _      -> empty
+
+fastSteps :: Term Void -> [Term Void]
+fastSteps t0 = runYieldST $ go (absurd <$> t0)
+  where
+    go :: Term (TermRef s) -> YieldST s (Term Void) ()
+    go t = do
+        yield =<< stToPrim (inline t)
+        stToPrim (runMaybeT $ stepS t) >>= \case
+            Just t' -> go t'
+            Nothing -> return ()
+
+inline :: Term (TermRef s) -> ST s (Term Void)
+inline = \case
+    X (TermRef ref) -> inline =<< readSTRef ref
+    l :> r          -> (:>) <$> inline l <*> inline r
+    x               -> return $ error "unreachable" <$> x
+
+liftMaybe :: Monad m => Maybe a -> MaybeT m a
+liftMaybe = maybe empty return

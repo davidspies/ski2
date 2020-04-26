@@ -15,6 +15,6 @@ main = do
             [     t ] -> read t
             _ : _ : _ -> error "Too many args"
     t <- readLn :: IO (Term Void)
-    forM_ (steps t) $ \t' -> do
+    forM_ (fastSteps t) $ \t' -> do
         print t'
         threadDelay delay

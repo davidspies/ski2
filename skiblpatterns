@@ -38,12 +38,6 @@ x+1 = V(KI)x
 x-1 = x(KI)
 x?0 = xK (true=K;false=KI)
 
-...
+---
 
 x-y = M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(y(T(KI))(x(V(KI))I))
-
-M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(SBI)(SBI)(T(KI))(SBI(SB(SBI)(SB(SBI)))(V(KI))I))
-
-M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(SBI)(SBI)(T(KI))(SB(SBI)(SBI)(SBI)(V(KI))I))
-
-M(L(B(S(VK(KI)))(B(B(SB))(CB(T(KI))))))(SB(SBI)(T(KI))(SBI(V(KI))I))
